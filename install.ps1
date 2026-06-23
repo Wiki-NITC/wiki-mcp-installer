@@ -467,13 +467,90 @@ if ($shortcutsCreated -eq 0 -and -not $wshell) {
     Write-Host "  No shortcuts created." -ForegroundColor Yellow
 }
 
-# ── 10. Validate ──────────────────────────────────────────────────────────
+# ── 10. Validate config ────────────────────────────────────────────────────
 Step "10/10  Validation"
 
-if (Test-Path "scripts/validate-config.ps1") {
-    & .\scripts\validate-config.ps1
+$valErr = 0
+$configPath = "config.json"
+
+# 1. File exists and is valid JSON
+if (-not (Test-Path $configPath)) {
+    Warn "config.json not found"
+    $valErr++
 } else {
-    Warn "validate-config.ps1 not found, skipping"
+    Pass "Config file exists: $configPath"
+    try {
+        $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        Pass "Valid JSON"
+    } catch {
+        Warn "Invalid JSON: $($_.Exception.Message)"
+        $valErr++
+        $cfg = $null
+    }
+}
+
+if ($cfg) {
+    # 2. Top-level fields
+    if ([string]::IsNullOrEmpty($cfg.defaultWiki)) {
+        Warn "Missing 'defaultWiki' field"
+        $valErr++
+    } else {
+        Pass "defaultWiki: $($cfg.defaultWiki)"
+    }
+
+    $wikiCount = @($cfg.wikis.PSObject.Properties).Count
+    if ($wikiCount -eq 0) {
+        Warn "No wikis configured under 'wikis' key"
+        $valErr++
+    } else {
+        Pass "Found $wikiCount wiki(s) configured"
+    }
+
+    # 3. Per-wiki validation + 4. Connectivity check
+    foreach ($wikiProp in $cfg.wikis.PSObject.Properties) {
+        $wikiKey = $wikiProp.Name
+        $wiki    = $wikiProp.Value
+        Write-Host "  Wiki: $wikiKey" -ForegroundColor Cyan
+
+        if ([string]::IsNullOrEmpty($wiki.sitename)) {
+            Warn "[$wikiKey] Missing sitename"; $valErr++
+        } else {
+            Pass "[$wikiKey] sitename: $($wiki.sitename)"
+        }
+
+        if ([string]::IsNullOrEmpty($wiki.server)) {
+            Warn "[$wikiKey] Missing server"; $valErr++
+        } else {
+            Pass "[$wikiKey] server: $($wiki.server)"
+            # 4. Connectivity check
+            $apiUrl = "$($wiki.server.TrimEnd('/'))$($wiki.scriptpath.TrimEnd('/'))/api.php"
+            try {
+                $siteInfo = Invoke-RestMethod -Uri "$apiUrl`?action=query&meta=siteinfo&format=json" -TimeoutSec 5 -UseBasicParsing
+                Pass "[$wikiKey] API reachable: $apiUrl"
+                Write-Host "    [INFO] Remote sitename: $($siteInfo.query.general.sitename)" -ForegroundColor Cyan
+            } catch {
+                Warn "[$wikiKey] API not reachable at $apiUrl"
+            }
+        }
+
+        $hasUser = -not [string]::IsNullOrEmpty($wiki.username)
+        $hasPass = -not [string]::IsNullOrEmpty($wiki.password)
+        if ($wiki.private -eq $true) {
+            if (-not ($hasUser -and $hasPass) -and [string]::IsNullOrEmpty($wiki.token)) {
+                Warn "[$wikiKey] Private wiki but no auth configured"
+                $valErr++
+            } else {
+                Pass "[$wikiKey] Auth configured for private wiki"
+            }
+        }
+    }
+}
+
+if ($valErr -eq 0) {
+    Pass "All validations passed"
+} else {
+    $plural = if ($valErr -eq 1) { "" } else { "s" }
+    Warn "$valErr validation warning$plural — config may need manual review"
 }
 
 # ── Done ─────────────────────────────────────────────────────────────────
