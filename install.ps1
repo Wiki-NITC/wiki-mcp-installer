@@ -133,13 +133,15 @@ function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S"
 # ── 0. Location guard ────────────────────────────────────────────────────
 Step "0/10  Checking install location"
 
+$tempEsc   = [regex]::Escape($env:TEMP.TrimEnd('\'))
+$windirEsc = [regex]::Escape($env:WINDIR.TrimEnd('\'))
 $BadPaths = @(
     "^[A-Z]:\\$",              # C:\, D:\, etc.
     "^[A-Z]:\\Windows\\",
     "^[A-Z]:\\Program Files",
     "^[A-Z]:\\Program Files \(x86\)",
-    "$env:TEMP\\",
-    "$env:WINDIR\\"
+    "^$tempEsc\\",
+    "^$windirEsc\\"
 )
 
 $CurrentDir = (Get-Location).Path
