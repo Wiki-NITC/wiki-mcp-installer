@@ -171,6 +171,7 @@ if (-not (Ensure-Program "git" "Git.Git" $GitUrl "git-install.exe" "/VERYSILENT 
 }
 
 # ── 1b. Ensure bash (bundled with Git for Windows) ───────────────────────
+$bashDir = $null
 $bashProbePaths = @(
     "${env:ProgramFiles}\Git\bin",
     "${env:ProgramFiles(x86)}\Git\bin"
@@ -179,6 +180,7 @@ if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
     foreach ($p in $bashProbePaths) {
         if (Test-Path "$p\bash.exe") {
             $env:Path = "$p;$env:Path"
+            $bashDir = $p
             break
         }
     }
@@ -187,6 +189,13 @@ $bashCheck = Get-Command bash -ErrorAction SilentlyContinue
 if ($bashCheck) {
     $ver = & $bashCheck.Source --version 2>$null
     Pass "bash found: $($ver.Split("`n")[0])"
+    if ($bashDir) {
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($userPath -notlike "*$bashDir*") {
+            [Environment]::SetEnvironmentVariable("Path", "$userPath;$bashDir", "User")
+            Pass "Git\bin added to User PATH"
+        }
+    }
 } else {
     Warn "bash not found — MCP command in opencode.json may fail"
 }
@@ -315,7 +324,8 @@ if (-not (Test-Path "config.json")) {
             }
         }
     }
-    $config | ConvertTo-Json -Depth 3 | Out-File "config.json" -Encoding UTF8
+    $json = $config | ConvertTo-Json -Depth 3
+    [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
     Pass "config.json created (read-only mode)"
 } else {
     Pass "config.json already exists"
@@ -388,7 +398,8 @@ if ($wiki.username -and $wiki.password) {
                 $config = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
                 $config.wikis."wiki.fosscell.org".username = $botUser
                 $config.wikis."wiki.fosscell.org".password = $botPassPlain
-                $config | ConvertTo-Json -Depth 5 | Out-File "config.json" -Encoding UTF8
+                $json = $config | ConvertTo-Json -Depth 5
+                [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
                 Pass "Credentials saved to config.json"
             } else {
                 Warn "Login failed: $($loginResult.login.result). Credentials not saved."
