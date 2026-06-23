@@ -374,7 +374,7 @@ if ($wiki.username -and $wiki.password) {
     }
 }
 
-# ── 8. PowerShell profile alias (optional) ──────────────────────────────
+# ── 8. PowerShell profile alias ──────────────────────────────────────────
 Step "8/10  PowerShell alias"
 
 $aliasExists = $false
@@ -388,6 +388,11 @@ if (Test-Path $ProfilePath) {
 
 if (-not $aliasExists) {
     Write-Host "  Adding 'wiki-mcp' alias to PowerShell profile ..." -ForegroundColor Yellow
+    # Ensure the profile directory exists (OneDrive paths may not be created yet)
+    $profileDir = Split-Path $ProfilePath -Parent
+    if (-not (Test-Path $profileDir)) {
+        New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+    }
     $fullPath = (Get-Location).Path
     $aliasLine = "`n# NITC Wiki MCP`nfunction wiki-mcp { opencode --project `"$fullPath`" }"
     Add-Content -Path $ProfilePath -Value $aliasLine -Encoding UTF8
