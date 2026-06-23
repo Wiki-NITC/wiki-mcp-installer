@@ -63,7 +63,7 @@ function Die($Msg) {
     exit 1
 }
 
-function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S") {
+function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S", $ProbePaths = @()) {
     $existing = Get-Command $Name -ErrorAction SilentlyContinue
     if ($existing) {
         Pass "$Name found at $($existing.Source)"
@@ -108,6 +108,21 @@ function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S"
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                 [Environment]::GetEnvironmentVariable("Path", "User")
     $existing = Get-Command $Name -ErrorAction SilentlyContinue
+    if (-not $existing -and $ProbePaths) {
+        # msiexec sometimes doesn't flush PATH changes back to the registry
+        # in time. Probe known install locations as a fallback.
+        foreach ($p in $ProbePaths) {
+            if (Test-Path "$p\$Name.exe") {
+                $env:Path = "$p;$env:Path"
+                $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+                if ($userPath -notlike "*$p*") {
+                    [Environment]::SetEnvironmentVariable("Path", "$userPath;$p", "User")
+                }
+                $existing = Get-Command $Name -ErrorAction SilentlyContinue
+                if ($existing) { break }
+            }
+        }
+    }
     if (-not $existing) {
         Die "$Name was installed but not found in PATH. Restart your terminal and re-run."
     }
@@ -170,7 +185,8 @@ if ($node) {
 }
 
 if (-not $nodeOk) {
-    Ensure-Program "node" "OpenJS.NodeJS.LTS" $NodeUrl "node-install.msi"
+    $nodeProbePaths = @("$env:ProgramFiles\nodejs", "${env:ProgramFiles(x86)}\nodejs")
+    Ensure-Program "node" "OpenJS.NodeJS.LTS" $NodeUrl "node-install.msi" -ProbePaths $nodeProbePaths
     $ver = & node -p "process.versions.node"
     $major = [int]($ver -split '\.')[0]
     if ($major -lt 22) {
