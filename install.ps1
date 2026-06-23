@@ -8,6 +8,7 @@
       1. Installs Git and Node.js 22+
       2. Installs opencode
       3. Clones Wiki-NITC/wiki-mcp into the current directory
+      3b. Patches opencode.json to use cmd/npx.cmd (Windows-native MCP command)
       4. Creates config.json with wiki.fosscell.org defaults
       5. Checks whether you have a wiki account and opens signup if not
       6. Prompts for bot credentials (opens browser to BotPasswords page)
@@ -223,6 +224,21 @@ if (Test-Path "$RepoDir\.git") {
     if ($LASTEXITCODE -ne 0) { Die "Failed to clone repo." }
     Push-Location $RepoDir
     Pass "Cloned into '$RepoDir'"
+}
+
+# ── 3b. Patch opencode.json for Windows ─────────────────────────────────
+Step "3b/10  Windows MCP command"
+
+$ocPath = "opencode.json"
+if (Test-Path $ocPath) {
+    $oc = Get-Content $ocPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $verMatch = Select-String -Path "scripts\start-mcp.sh" -Pattern 'MCP_VERSION="(.+)"' -ErrorAction Stop
+    $mcpVer = $verMatch.Matches.Groups[1].Value
+    $oc.mcp."wiki.fosscell.org".command = @("cmd", "/c", "npx.cmd", "@professional-wiki/mediawiki-mcp-server@${mcpVer}")
+    $oc | ConvertTo-Json -Depth 5 | Out-File $ocPath -Encoding UTF8
+    Pass "Windows-optimized MCP command (cmd /c npx.cmd @ v${mcpVer})"
+} else {
+    Warn "opencode.json not found — cannot patch MCP command"
 }
 
 # ── 4. Install opencode ──────────────────────────────────────────────────
