@@ -309,8 +309,11 @@ Write-Host ""
 $answer = Read-Host "  Do you already have a wiki account? (Y/n)"
 if ($answer -match '^[Nn]') {
     Write-Host "  Opening registration page ..." -ForegroundColor Yellow
-    Start-Process "https://wiki.fosscell.org/index.php?title=Special:CreateAccount"
+    try { Start-Process "https://wiki.fosscell.org/index.php?title=Special:CreateAccount" }
+    catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/index.php?title=Special:CreateAccount") | Out-Null }
     Read-Host "  Press Enter after you have created your account"
+} else {
+    Write-Host "  Tip: Visit https://wiki.fosscell.org/index.php?title=Special:CreateAccount if you need an account later." -ForegroundColor Yellow
 }
 Pass "Wiki account check done"
 
@@ -334,6 +337,9 @@ if ($wiki.username -and $wiki.password) {
         Write-Host "  4. Enter the bot username and password below" -ForegroundColor Cyan
         Write-Host "     (Bot username looks like 'YourName@bot-name')" -ForegroundColor Cyan
         Write-Host ""
+        Write-Host "  Opening BotPasswords page ..." -ForegroundColor Yellow
+        try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
+        catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
 
         $botUser = Read-Host "  Bot username (e.g. MyName@my-bot)"
         $botPass = Read-Host "  Bot password" -AsSecureString
