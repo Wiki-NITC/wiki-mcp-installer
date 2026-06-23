@@ -170,6 +170,27 @@ if (-not (Ensure-Program "git" "Git.Git" $GitUrl "git-install.exe" "/VERYSILENT 
     Die "Git could not be installed automatically. Install it from https://git-scm.com and re-run."
 }
 
+# ── 1b. Ensure bash (bundled with Git for Windows) ───────────────────────
+$bashProbePaths = @(
+    "${env:ProgramFiles}\Git\bin",
+    "${env:ProgramFiles(x86)}\Git\bin"
+)
+if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+    foreach ($p in $bashProbePaths) {
+        if (Test-Path "$p\bash.exe") {
+            $env:Path = "$p;$env:Path"
+            break
+        }
+    }
+}
+$bashCheck = Get-Command bash -ErrorAction SilentlyContinue
+if ($bashCheck) {
+    $ver = & $bashCheck.Source --version 2>$null
+    Pass "bash found: $($ver.Split("`n")[0])"
+} else {
+    Warn "bash not found — MCP command in opencode.json may fail"
+}
+
 # ── 2. Check/Install Node.js ──────────────────────────────────────────────
 Step "2/10  Node.js"
 
