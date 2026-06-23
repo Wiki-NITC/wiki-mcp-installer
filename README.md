@@ -8,30 +8,45 @@ It wires together:
 - [`@professional-wiki/mediawiki-mcp-server`](https://www.npmjs.com/package/@professional-wiki/mediawiki-mcp-server) — an MCP server that exposes MediaWiki's API as tools the agent can call
 - Your own wiki bot account, scoped to specific permissions
 
-This repo contains only the installer (`install.sh`). The actual agent config, skills, and rules live in [`Wiki-NITC/wiki-mcp`](https://github.com/Wiki-NITC/wiki-mcp), which the script clones for you.
+This repo contains the installers for **Linux** (`install.sh`) and **Windows** (`install.ps1`). The actual agent config, skills, and rules live in [`Wiki-NITC/wiki-mcp`](https://github.com/Wiki-NITC/wiki-mcp), which the script clones for you.
 
 ## Quick install
 
+### Linux (Ubuntu 22.04+)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR-USERNAME/wiki-mcp-installer/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Wiki-NITC/wiki-mcp-installer/main/install.sh | bash
 ```
 
-or clone and run it locally:
+### Windows (PowerShell 5.1+)
+```powershell
+powershell -c "iwr -useb https://raw.githubusercontent.com/Wiki-NITC/wiki-mcp-installer/main/install.ps1 | iex"
+```
 
+Or clone and run locally:
 ```bash
-git clone https://github.com/YOUR-USERNAME/wiki-mcp-installer.git
+git clone https://github.com/Wiki-NITC/wiki-mcp-installer.git
 cd wiki-mcp-installer
+# Linux:
 bash install.sh
+# Windows:
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 ## Requirements
 
+### Linux
 - Ubuntu 22.04+ (tested on 24.04 LTS)
 - `sudo` access (for installing system packages)
 - An internet connection
 - A wiki account on `wiki.fosscell.org` (the script helps you create one if you don't have it — signups are open to `@nitc.ac.in` email addresses)
 
-## What the script does
+### Windows
+- Windows 10+ / Windows Server 2016+
+- PowerShell 5.1+
+- An internet connection
+- A wiki account on `wiki.fosscell.org`
+
+## What the Linux script does
 
 1. Verifies you're on Ubuntu.
 2. Installs `curl`, `jq`, `git`, and `zenity` (zenity is optional — enables GUI dialogs; falls back to plain terminal prompts if unavailable).
@@ -44,9 +59,28 @@ bash install.sh
 9. Adds a `wiki-mcp` alias to your shell config (`.bashrc` and/or `.zshrc`).
 10. Creates a desktop launcher and app-menu entry.
 
+## What the Windows script does
+
+1. Checks install location — auto-relocates from C:\ to `%USERPROFILE%\wiki-mcp`.
+2. Installs Git (winget or direct download).
+3. Installs Node.js 22+ (winget or direct download).
+4. Installs `opencode` (GitHub release → PATH).
+5. Clones `wiki-mcp` into the working directory.
+6. Creates `config.json` with wiki.fosscell.org defaults.
+7. Checks wiki account and prompts for bot credentials (with API verification).
+8. Adds `wiki-mcp` PowerShell function to your profile.
+9. Creates desktop + Start Menu shortcuts.
+10. Validates the setup.
+
 ## Usage
 
-After installation, either:
+### Linux
+After installation, run `wiki-mcp` in a new terminal (or `source ~/.bashrc` / `source ~/.zshrc` first if using the same session), or double-click the **wiki-mcp** desktop icon.
+
+### Windows
+After installation, run `wiki-mcp` in a new PowerShell terminal (or restart PowerShell), or double-click the **NITC Wiki MCP** desktop shortcut.
+
+First run downloads opencode's model (~2GB) — this happens once.
 - Run `wiki-mcp` in a new terminal (or `source ~/.bashrc` / `source ~/.zshrc` first if using the same session), or
 - Double-click the **wiki-mcp** desktop icon / find it in your app launcher.
 
@@ -81,6 +115,8 @@ You can review or revoke any bot password anytime at [`Special:BotPasswords`](ht
 | `Node.js installation failed` | NodeSource setup script may be blocked by network/firewall — try `sudo apt install nodejs` directly or check `https://deb.nodesource.com/`. |
 | `wiki-mcp` command not found after install | Run `source ~/.bashrc` (or `~/.zshrc`) once, or open a new terminal. |
 | MCP server check times out | Harmless — it just means the package wasn't cached yet; it downloads on first real run. |
+| `git clone` fails on Windows | Script auto-relocates from C:\ to `%USERPROFILE%\wiki-mcp`. If you're still seeing issues, run from a directory under `%USERPROFILE%`. |
+| `winget install` fails on Windows | Falls back to direct download. If both fail, install Git/Node.js manually and re-run. |
 
 ## Re-running the installer
 
