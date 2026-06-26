@@ -87,6 +87,10 @@ function Read-HostSafe($Prompt, $Default = "") {
     return $Default
 }
 
+function Resolve-RelativePath($RelPath) {
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RelPath)
+}
+
 function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S", $ProbePaths = @()) {
     $existing = Get-Command $Name -ErrorAction SilentlyContinue
     if ($existing) {
@@ -389,7 +393,7 @@ if (-not (Test-Path "config.json")) {
         }
     }
     $json = $config | ConvertTo-Json -Depth 3
-    [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
     Pass "config.json created (read-only mode)"
 } else {
     Pass "config.json already exists"
@@ -467,7 +471,7 @@ if ($wiki.username -and $wiki.password) {
                     $config.wikis."wiki.fosscell.org".username = $botUser
                     $config.wikis."wiki.fosscell.org".password = $botPassPlain
                     $json = $config | ConvertTo-Json -Depth 5
-                    [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
+                    [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
                     Pass "Credentials saved to config.json"
                 } else {
                     Warn "Login failed: $($loginResult.login.result). Credentials not saved."
