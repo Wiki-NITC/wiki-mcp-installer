@@ -7,8 +7,9 @@
     What it does:
       1. Installs Git and Node.js 22+
       2. Installs opencode
-      3. Clones Wiki-NITC/wiki-mcp into the current directory
-      4. Creates config.json with wiki.fosscell.org defaults
+       3. Clones Wiki-NITC/wiki-mcp into the current directory
+       3b. Patches opencode.json for Windows MCP compatibility (cmd/npx.cmd)
+       4. Creates config.json with wiki.fosscell.org defaults
       5. Checks whether you have a wiki account and opens signup if not
       6. Prompts for bot credentials (opens browser to BotPasswords page)
       7. Adds a `wiki-mcp` PowerShell function to your profile
@@ -24,6 +25,10 @@
 
 #Requires -Version 5.1
 
+param(
+    [switch]$NonInteractive
+)
+
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
@@ -31,8 +36,21 @@ $ErrorActionPreference = "Stop"
 $RepoUrl  = "https://github.com/Wiki-NITC/wiki-mcp.git"
 $RepoDir  = "wiki-mcp"
 $NodeVer  = "22.12.0"
-$NodeUrl  = "https://nodejs.org/dist/v$NodeVer/node-v$NodeVer-x64.msi"
-$GitUrl   = "https://github.com/git-for-windows/git/releases/latest/download/Git-2.47.0-64-bit.exe"
+$Arch     = switch ($env:PROCESSOR_ARCHITECTURE) { "ARM64" { "arm64" } default { "x64" } }
+$NodeUrl  = "https://nodejs.org/dist/v$NodeVer/node-v$NodeVer-$Arch.msi"
+$GitUrl   = "https://github.com/git-for-windows/git/releases/latest/download/Git-2.47.1-64-bit.exe"
+function Get-LatestGitUrl {
+    $fallback = $GitUrl
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest" -UseBasicParsing
+        $gitArch = if ($Arch -eq "arm64") { "arm64" } else { "64-bit" }
+        $asset = $release.assets | Where-Object { $_.name -like "Git-*-$gitArch.exe" } | Select-Object -First 1
+        if ($asset -and $asset.browser_download_url) { return $asset.browser_download_url }
+    } catch {
+        Warn "Could not fetch latest Git version, using fallback"
+    }
+    return $fallback
+}
 $OpencodeDir = "$env:USERPROFILE\.opencode\bin"
 $OpencodeExe = "$OpencodeDir\opencode.exe"
 $ProfilePath = $PROFILE.CurrentUserAllHosts
@@ -43,7 +61,7 @@ $ProfilePath = $PROFILE.CurrentUserAllHosts
 # The pause at the end matters most for double-click launches where the
 # window would vanish immediately.  In a terminal (or iex) pressing Enter
 # once is harmless.
-$IsInteractive = $host.Name -eq "ConsoleHost" -and $null -ne $host.UI.RawUI
+$IsInteractive = -not $NonInteractive -and $host.Name -eq "ConsoleHost" -and $null -ne $host.UI.RawUI -and -not [Console]::IsInputRedirected
 
 function Step($Title) {
     Write-Host "`n==> $Title" -ForegroundColor Cyan
@@ -63,6 +81,12 @@ function Die($Msg) {
     exit 1
 }
 
+function Read-HostSafe($Prompt, $Default = "") {
+    if ($IsInteractive) { return Read-Host $Prompt }
+    Write-Host "  [SKIP] '$Prompt' (non-interactive, default: '$Default')" -ForegroundColor Yellow
+    return $Default
+}
+
 function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S", $ProbePaths = @()) {
     $existing = Get-Command $Name -ErrorAction SilentlyContinue
     if ($existing) {
@@ -77,9 +101,13 @@ function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S"
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget -and $WingetId) {
         Write-Host "  Installing $Name via winget ..." -ForegroundColor Yellow
-        & winget install $WingetId --accept-package-agreements --accept-source-agreements | Out-Null
+        $wingetOut = & winget install $WingetId --accept-package-agreements --accept-source-agreements 2>&1
         if ($LASTEXITCODE -eq 0) { $installed = $true }
-        else { Warn "winget install failed, trying direct download ..." }
+        else {
+            Warn "winget install failed:"
+            $wingetOut | ForEach-Object { Write-Host "      $_" -ForegroundColor DarkYellow }
+            Warn "Trying direct download ..."
+        }
     }
 
     # Fallback: direct download
@@ -166,7 +194,7 @@ if ($IsBadPath) {
 
 # ── 1. Check/Install Git ─────────────────────────────────────────────────
 Step "1/10  Git"
-if (-not (Ensure-Program "git" "Git.Git" $GitUrl "git-install.exe" "/VERYSILENT /NORESTART")) {
+if (-not (Ensure-Program "git" "Git.Git" (Get-LatestGitUrl) "git-install.exe" "/VERYSILENT /NORESTART")) {
     Die "Git could not be installed automatically. Install it from https://git-scm.com and re-run."
 }
 
@@ -255,6 +283,42 @@ if (Test-Path "$RepoDir\.git") {
     Pass "Cloned into '$RepoDir'"
 }
 
+# ── 3b. Configure opencode.json for Windows ────────────────────────────
+Step "3b/10  Windows MCP command"
+
+$ocPath = "opencode.json"
+if (Test-Path $ocPath) {
+    $ocText = Get-Content $ocPath -Raw -Encoding UTF8
+    $mcpShPath = Join-Path (Get-Location) "scripts" "start-mcp.sh"
+    if (Test-Path $mcpShPath) {
+        $mcpShContent = Get-Content $mcpShPath -Raw
+        $verMatch = [regex]::Match($mcpShContent, 'MCP_VERSION="(.+)"')
+        if ($verMatch.Success) {
+            $mcpVer = $verMatch.Groups[1].Value
+            $oc = $ocText | ConvertFrom-Json
+            $oc.mcp."wiki.fosscell.org".command = @("cmd", "/c", "npx.cmd", "@professional-wiki/mediawiki-mcp-server@${mcpVer}")
+            $oc | ConvertTo-Json -Depth 10 | Out-File $ocPath -Encoding UTF8
+            Pass "Windows-optimized MCP command (cmd /c npx.cmd @ v${mcpVer})"
+        } else {
+            Warn "Could not extract MCP version from scripts/start-mcp.sh"
+        }
+    } else {
+        Warn "scripts/start-mcp.sh not found, MCP command not patched"
+    }
+} else {
+    Warn "opencode.json not found in repo, creating default..."
+    $defaultOc = @{
+        mcp = @{
+            "wiki.fosscell.org" = @{
+                command = @("cmd", "/c", "npx.cmd", "@professional-wiki/mediawiki-mcp-server@latest")
+                args = @()
+            }
+        }
+    }
+    $defaultOc | ConvertTo-Json -Depth 5 | Out-File $ocPath -Encoding UTF8
+    Pass "Default opencode.json created"
+}
+
 # ── 4. Install opencode ──────────────────────────────────────────────────
 Step "4/10  opencode"
 
@@ -273,8 +337,8 @@ if (Test-Path $OpencodeExe) {
     }
     Write-Host "  Latest version: v$version" -ForegroundColor Yellow
 
-    $zipUrl = "https://github.com/anomalyco/opencode/releases/download/v$version/opencode-windows-x64.zip"
-    $zipTmp = "$env:TEMP\opencode-windows-x64.zip"
+    $zipUrl = "https://github.com/anomalyco/opencode/releases/download/v$version/opencode-windows-$Arch.zip"
+    $zipTmp = "$env:TEMP\opencode-windows-$Arch.zip"
 
     try {
         Invoke-WebRequest -Uri $zipUrl -OutFile $zipTmp -UseBasicParsing
@@ -337,12 +401,13 @@ Step "6/10  Wiki account"
 Write-Host "  You need a wiki account on wiki.fosscell.org to edit pages."
 Write-Host "  (It's free - anyone with @nitc.ac.in email can sign up.)"
 Write-Host ""
-$answer = Read-Host "  Do you already have a wiki account? (Y/n)"
+$answer = Read-HostSafe "  Do you already have a wiki account? (Y/n)" "y"
 if ($answer -match '^[Nn]') {
     Write-Host "  Opening registration page ..." -ForegroundColor Yellow
     try { Start-Process "https://wiki.fosscell.org/index.php?title=Special:CreateAccount" }
     catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/index.php?title=Special:CreateAccount") | Out-Null }
-    Read-Host "  Press Enter after you have created your account"
+    if ($IsInteractive) { Read-Host "  Press Enter after you have created your account" }
+    else { Write-Host "  [SKIP] Waiting for account creation (non-interactive mode)" -ForegroundColor Yellow }
 } else {
     Write-Host "  Tip: Visit https://wiki.fosscell.org/index.php?title=Special:CreateAccount if you need an account later." -ForegroundColor Yellow
 }
@@ -359,7 +424,7 @@ if ($wiki.username -and $wiki.password) {
 } else {
     Write-Host "  No wiki credentials configured yet." -ForegroundColor Yellow
     Write-Host "  Without them you can read the wiki but cannot edit." -ForegroundColor Yellow
-    $answer = Read-Host "  Set up a bot password now? (y/N)"
+    $answer = Read-HostSafe "  Set up a bot password now? (y/N)" "n"
     if ($answer -match '^[Yy]') {
         Write-Host ""
         Write-Host "  1. Go to:  https://wiki.fosscell.org/Special:BotPasswords" -ForegroundColor Cyan
@@ -372,42 +437,48 @@ if ($wiki.username -and $wiki.password) {
         try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
         catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
 
-        $botUser = Read-Host "  Bot username (e.g. MyName@my-bot)"
-        $botPass = Read-Host "  Bot password" -AsSecureString
-        $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
-
-        # Test the credentials against the MediaWiki API (shared session)
-        Write-Host "  Verifying credentials ..." -ForegroundColor Yellow
-        $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
-        $token = $loginToken.query.tokens.logintoken
-
-        $loginBody = @{
-            action    = "login"
-            lgname    = $botUser
-            lgpassword = $botPassPlain
-            lgtoken   = $token
-            format    = "json"
+        $botUser = Read-HostSafe "  Bot username (e.g. MyName@my-bot)" ""
+        if ($IsInteractive) {
+            $botPass = Read-Host "  Bot password" -AsSecureString
+        } else {
+            Write-Host "  [SKIP] Bot password entry (non-interactive mode)" -ForegroundColor Yellow
+            $botPass = $null
         }
-        try {
-            $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
-            if ($loginResult.login.result -eq "Success") {
-                Pass "Credentials verified! Logged in as $($loginResult.login.lgusername)"
+        if ($botUser -and $botPass) {
+            $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
 
-                # Write credentials into the parsed JSON object, then re-serialize
-                $config = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-                $config.wikis."wiki.fosscell.org".username = $botUser
-                $config.wikis."wiki.fosscell.org".password = $botPassPlain
-                $json = $config | ConvertTo-Json -Depth 5
-                [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
-                Pass "Credentials saved to config.json"
-            } else {
-                Warn "Login failed: $($loginResult.login.result). Credentials not saved."
+            Write-Host "  Verifying credentials ..." -ForegroundColor Yellow
+            $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
+            $token = $loginToken.query.tokens.logintoken
+
+            $loginBody = @{
+                action    = "login"
+                lgname    = $botUser
+                lgpassword = $botPassPlain
+                lgtoken   = $token
+                format    = "json"
+            }
+            try {
+                $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
+                if ($loginResult.login.result -eq "Success") {
+                    Pass "Credentials verified! Logged in as $($loginResult.login.lgusername)"
+
+                    $config.wikis."wiki.fosscell.org".username = $botUser
+                    $config.wikis."wiki.fosscell.org".password = $botPassPlain
+                    $json = $config | ConvertTo-Json -Depth 5
+                    [System.IO.File]::WriteAllText("config.json", $json, [System.Text.UTF8Encoding]::new($false))
+                    Pass "Credentials saved to config.json"
+                } else {
+                    Warn "Login failed: $($loginResult.login.result). Credentials not saved."
+                    Warn "You can manually add them to config.json later."
+                }
+            } catch {
+                Warn "Could not reach the wiki API. Credentials not saved."
                 Warn "You can manually add them to config.json later."
             }
-        } catch {
-            Warn "Could not reach the wiki API. Credentials not saved."
-            Warn "You can manually add them to config.json later."
+        } else {
+            Warn "Skipping credential verification (no bot user/password provided)"
         }
     }
 }
