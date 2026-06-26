@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# testinstaller.sh — One-command setup for wiki-mcp (Ubuntu)
+# install.sh — One-command setup for wiki-mcp (Ubuntu)
 #
 # Usage: bash testinstaller.sh
 #
