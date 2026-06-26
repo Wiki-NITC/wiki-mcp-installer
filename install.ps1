@@ -289,7 +289,7 @@ Step "3b/10  Windows MCP command"
 $ocPath = "opencode.json"
 if (Test-Path $ocPath) {
     $ocText = Get-Content $ocPath -Raw -Encoding UTF8
-    $mcpShPath = Join-Path (Get-Location) "scripts" "start-mcp.sh"
+    $mcpShPath = "scripts\start-mcp.sh"
     if (Test-Path $mcpShPath) {
         $mcpShContent = Get-Content $mcpShPath -Raw
         $verMatch = [regex]::Match($mcpShContent, 'MCP_VERSION="(.+)"')
