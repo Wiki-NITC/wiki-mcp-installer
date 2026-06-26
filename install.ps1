@@ -64,7 +64,7 @@ $ProfilePath = $PROFILE.CurrentUserAllHosts
 $IsInteractive = -not $NonInteractive -and $host.Name -eq "ConsoleHost" -and $null -ne $host.UI.RawUI -and -not [Console]::IsInputRedirected
 
 function Step($Title) {
-    Write-Host "`n==> $Title" -ForegroundColor Cyan
+    Write-Host "`n--- $Title ---" -ForegroundColor Cyan
 }
 
 function Pass($Msg) {
@@ -73,6 +73,10 @@ function Pass($Msg) {
 
 function Warn($Msg) {
     Write-Host "  [WARN] $Msg" -ForegroundColor Yellow
+}
+
+function Info($Msg) {
+    Write-Host "  [INFO] $Msg" -ForegroundColor Blue
 }
 
 function Die($Msg) {
@@ -162,8 +166,15 @@ function Ensure-Program($Name, $WingetId, $Url, $UrlFileName, $SilentArgs = "/S"
     return $true
 }
 
+# ── Header ─────────────────────────────────────────────────────────────────
+Clear-Host
+Write-Host "==============================================" -ForegroundColor Green
+Write-Host "  wiki-mcp Installer for Windows" -ForegroundColor Green
+Write-Host "==============================================" -ForegroundColor Green
+Write-Host ""
+
 # ── 0. Location guard ────────────────────────────────────────────────────
-Step "0/10  Checking install location"
+Step "Step 0: Checking install location"
 
 $tempEsc   = [regex]::Escape($env:TEMP.TrimEnd('\'))
 $windirEsc = [regex]::Escape($env:WINDIR.TrimEnd('\'))
@@ -197,7 +208,7 @@ if ($IsBadPath) {
 }
 
 # ── 1. Check/Install Git ─────────────────────────────────────────────────
-Step "1/10  Git"
+Step "Step 1: Git"
 if (-not (Ensure-Program "git" "Git.Git" (Get-LatestGitUrl) "git-install.exe" "/VERYSILENT /NORESTART")) {
     Die "Git could not be installed automatically. Install it from https://git-scm.com and re-run."
 }
@@ -233,7 +244,7 @@ if ($bashCheck) {
 }
 
 # ── 2. Check/Install Node.js ──────────────────────────────────────────────
-Step "2/10  Node.js"
+Step "Step 2: Node.js"
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 $nodeOk = $false
@@ -260,7 +271,7 @@ if (-not $nodeOk) {
 }
 
 # ── 3. Clone / update the repo ──────────────────────────────────────────
-Step "3/10  wiki-mcp repo"
+Step "Step 3: Downloading wiki-mcp from GitHub"
 
 if (Test-Path "$RepoDir\.git") {
     Push-Location $RepoDir
@@ -288,7 +299,7 @@ if (Test-Path "$RepoDir\.git") {
 }
 
 # ── 3b. Configure opencode.json for Windows ────────────────────────────
-Step "3b/10  Windows MCP command"
+Step "Step 3b: Windows MCP command"
 
 $ocPath = "opencode.json"
 if (Test-Path $ocPath) {
@@ -324,13 +335,13 @@ if (Test-Path $ocPath) {
 }
 
 # ── 4. Install opencode ──────────────────────────────────────────────────
-Step "4/10  opencode"
+Step "Step 4: opencode"
 
 if (Test-Path $OpencodeExe) {
     $ver = & $OpencodeExe --version 2>$null
     Pass "opencode found: $ver"
 } else {
-    Write-Host "  opencode not found. Downloading for Windows-x64 ..." -ForegroundColor Yellow
+    Write-Host "  opencode not found. Downloading ..." -ForegroundColor Yellow
 
     # Resolve latest version
     try {
@@ -375,7 +386,7 @@ if (Test-Path $OpencodeExe) {
 }
 
 # ── 5. Create config.json ────────────────────────────────────────────────
-Step "5/10  Config"
+Step "Step 5: Config"
 
 if (-not (Test-Path "config.json")) {
     $config = @{
@@ -400,10 +411,21 @@ if (-not (Test-Path "config.json")) {
 }
 
 # ── 6. Wiki account check ──────────────────────────────────────────────
-Step "6/10  Wiki account"
+Step "Step 6: Wiki account"
 
-Write-Host "  You need a wiki account on wiki.fosscell.org to edit pages."
-Write-Host "  (It's free - anyone with @nitc.ac.in email can sign up.)"
+Write-Host "  Checking wiki.fosscell.org..."
+$wikiUrl = "https://wiki.fosscell.org"
+$apiUrl = "$wikiUrl/api.php"
+try {
+    $siteInfo = Invoke-RestMethod -Uri "$apiUrl`?action=query&meta=siteinfo&format=json" -TimeoutSec 5 -UseBasicParsing
+    Pass "Wiki is online"
+} catch {
+    Warn "Cannot reach wiki.fosscell.org — check your internet"
+}
+Write-Host ""
+
+Write-Host "  You need a wiki account to use this tool."
+Write-Host "  (It's free — anyone with @nitc.ac.in email can sign up.)"
 Write-Host ""
 $answer = Read-HostSafe "  Do you already have a wiki account? (Y/n)" "y"
 if ($answer -match '^[Nn]') {
@@ -417,8 +439,8 @@ if ($answer -match '^[Nn]') {
 }
 Pass "Wiki account check done"
 
-# ── 7. Bot-password setup (optional) ─────────────────────────────────────
-Step "7/10  Wiki credentials (optional)"
+# ── 7. Bot password setup ────────────────────────────────────────────────
+Step "Step 7: Bot password"
 
 $config = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 $wiki = $config.wikis."wiki.fosscell.org"
@@ -426,69 +448,75 @@ $wiki = $config.wikis."wiki.fosscell.org"
 if ($wiki.username -and $wiki.password) {
     Pass "Credentials already configured for user '$($wiki.username)'"
 } else {
-    Write-Host "  No wiki credentials configured yet." -ForegroundColor Yellow
-    Write-Host "  Without them you can read the wiki but cannot edit." -ForegroundColor Yellow
-    $answer = Read-HostSafe "  Set up a bot password now? (y/N)" "n"
-    if ($answer -match '^[Yy]') {
-        Write-Host ""
-        Write-Host "  1. Go to:  https://wiki.fosscell.org/Special:BotPasswords" -ForegroundColor Cyan
-        Write-Host "  2. Log in with your NITC wiki account" -ForegroundColor Cyan
-        Write-Host "  3. Create a bot password with minimum scopes" -ForegroundColor Cyan
-        Write-Host "  4. Enter the bot username and password below" -ForegroundColor Cyan
-        Write-Host "     (Bot username looks like 'YourName@bot-name')" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  Opening BotPasswords page ..." -ForegroundColor Yellow
-        try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
-        catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
+    Write-Host "  Now create a bot password so the AI can log in." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  A browser window will open to:" -ForegroundColor Yellow
+    Write-Host "     https://wiki.fosscell.org/Special:BotPasswords" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Steps in the browser:" -ForegroundColor Yellow
+    Write-Host "    1. Log in (if not already)" -ForegroundColor Yellow
+    Write-Host "    2. Name it:  wiki-mcp" -ForegroundColor Yellow
+    Write-Host "    3. Tick: Basic rights + Edit existing pages + Create, edit, and move pages + High-volume editing" -ForegroundColor Yellow
+    Write-Host "    4. Click 'Create'" -ForegroundColor Yellow
+    Write-Host "    5. Copy the generated password" -ForegroundColor Yellow
+    Write-Host ""
 
-        $botUser = Read-HostSafe "  Bot username (e.g. MyName@my-bot)" ""
-        if ($IsInteractive) {
-            $botPass = Read-Host "  Bot password" -AsSecureString
-        } else {
-            Write-Host "  [SKIP] Bot password entry (non-interactive mode)" -ForegroundColor Yellow
-            $botPass = $null
+    if ($IsInteractive) {
+        Read-Host "  Press Enter to open the browser and continue..."
+    } else {
+        Write-Host "  [SKIP] Opening browser (non-interactive mode)" -ForegroundColor Yellow
+    }
+    try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
+    catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
+
+    $botUser = Read-HostSafe "  Bot username (e.g. MyName@wiki-mcp)" ""
+    if ($IsInteractive) {
+        $botPass = Read-Host "  Bot password" -AsSecureString
+    } else {
+        Write-Host "  [SKIP] Bot password entry (non-interactive mode)" -ForegroundColor Yellow
+        $botPass = $null
+    }
+
+    if ($botUser -and $botPass) {
+        $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
+
+        Info "Verifying credentials..."
+        $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
+        $token = $loginToken.query.tokens.logintoken
+
+        $loginBody = @{
+            action    = "login"
+            lgname    = $botUser
+            lgpassword = $botPassPlain
+            lgtoken   = $token
+            format    = "json"
         }
-        if ($botUser -and $botPass) {
-            $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
+        try {
+            $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
+            if ($loginResult.login.result -eq "Success") {
+                Pass "Wiki credentials verified"
 
-            Write-Host "  Verifying credentials ..." -ForegroundColor Yellow
-            $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
-            $token = $loginToken.query.tokens.logintoken
-
-            $loginBody = @{
-                action    = "login"
-                lgname    = $botUser
-                lgpassword = $botPassPlain
-                lgtoken   = $token
-                format    = "json"
-            }
-            try {
-                $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
-                if ($loginResult.login.result -eq "Success") {
-                    Pass "Credentials verified! Logged in as $($loginResult.login.lgusername)"
-
-                    $config.wikis."wiki.fosscell.org".username = $botUser
-                    $config.wikis."wiki.fosscell.org".password = $botPassPlain
-                    $json = $config | ConvertTo-Json -Depth 5
-                    [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
-                    Pass "Credentials saved to config.json"
-                } else {
-                    Warn "Login failed: $($loginResult.login.result). Credentials not saved."
-                    Warn "You can manually add them to config.json later."
-                }
-            } catch {
-                Warn "Could not reach the wiki API. Credentials not saved."
+                $config.wikis."wiki.fosscell.org".username = $botUser
+                $config.wikis."wiki.fosscell.org".password = $botPassPlain
+                $json = $config | ConvertTo-Json -Depth 5
+                [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
+                Pass "Credentials saved to config.json"
+            } else {
+                Warn "Login failed: $($loginResult.login.result). Credentials not saved."
                 Warn "You can manually add them to config.json later."
             }
-        } else {
-            Warn "Skipping credential verification (no bot user/password provided)"
+        } catch {
+            Warn "Could not reach the wiki API. Credentials not saved."
+            Warn "You can manually add them to config.json later."
         }
+    } else {
+        Warn "Skipping credential verification (no bot user/password provided)"
     }
 }
 
 # ── 8. PowerShell profile alias ──────────────────────────────────────────
-Step "8/10  PowerShell alias"
+Step "Step 8: Adding wiki-mcp terminal command"
 
 $aliasExists = $false
 if (Test-Path $ProfilePath) {
@@ -514,7 +542,7 @@ if (-not $aliasExists) {
 }
 
 # ── 9. Desktop & Start Menu shortcuts ───────────────────────────────────
-Step "9/10  Shortcuts"
+Step "Step 9: Desktop shortcut"
 
 $desktop = [Environment]::GetFolderPath("Desktop")
 $startMenu = [Environment]::GetFolderPath("Programs")
@@ -575,119 +603,78 @@ if ($shortcutsCreated -eq 0 -and -not $wshell) {
 }
 
 # ── 10. Validate config ────────────────────────────────────────────────────
-Step "10/10  Validation"
+Step "Step 10: Validation"
 
-$valErr = 0
-$configPath = "config.json"
-
-# 1. File exists and is valid JSON
-if (-not (Test-Path $configPath)) {
-    Warn "config.json not found"
-    $valErr++
-} else {
-    Pass "Config file exists: $configPath"
-    try {
-        $cfg = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        Pass "Valid JSON"
-    } catch {
-        Warn "Invalid JSON: $($_.Exception.Message)"
-        $valErr++
-        $cfg = $null
-    }
+# Test config JSON
+try {
+    $cfg = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+    Pass "config.json is valid JSON"
+} catch {
+    Die "config.json has invalid JSON — $($_.Exception.Message)"
 }
 
-if ($cfg) {
-    # 2. Top-level fields
-    if ([string]::IsNullOrEmpty($cfg.defaultWiki)) {
-        Warn "Missing 'defaultWiki' field"
-        $valErr++
-    } else {
-        Pass "defaultWiki: $($cfg.defaultWiki)"
-    }
-
-    $wikiCount = @($cfg.wikis.PSObject.Properties).Count
-    if ($wikiCount -eq 0) {
-        Warn "No wikis configured under 'wikis' key"
-        $valErr++
-    } else {
-        Pass "Found $wikiCount wiki(s) configured"
-    }
-
-    # 3. Per-wiki validation + 4. Connectivity check
-    foreach ($wikiProp in $cfg.wikis.PSObject.Properties) {
-        $wikiKey = $wikiProp.Name
-        $wiki    = $wikiProp.Value
-        Write-Host "  Wiki: $wikiKey" -ForegroundColor Cyan
-
-        if ([string]::IsNullOrEmpty($wiki.sitename)) {
-            Warn "[$wikiKey] Missing sitename"; $valErr++
-        } else {
-            Pass "[$wikiKey] sitename: $($wiki.sitename)"
-        }
-
-        if ([string]::IsNullOrEmpty($wiki.server)) {
-            Warn "[$wikiKey] Missing server"; $valErr++
-        } else {
-            Pass "[$wikiKey] server: $($wiki.server)"
-            # 4. Connectivity check
-            $apiUrl = "$($wiki.server.TrimEnd('/'))$($wiki.scriptpath.TrimEnd('/'))/api.php"
-            try {
-                $siteInfo = Invoke-RestMethod -Uri "$apiUrl`?action=query&meta=siteinfo&format=json" -TimeoutSec 5 -UseBasicParsing
-                Pass "[$wikiKey] API reachable: $apiUrl"
-                Write-Host "    [INFO] Remote sitename: $($siteInfo.query.general.sitename)" -ForegroundColor Cyan
-            } catch {
-                Warn "[$wikiKey] API not reachable at $apiUrl"
-            }
-        }
-
-        $hasUser = -not [string]::IsNullOrEmpty($wiki.username)
-        $hasPass = -not [string]::IsNullOrEmpty($wiki.password)
-        if ($wiki.private -eq $true) {
-            if (-not ($hasUser -and $hasPass) -and [string]::IsNullOrEmpty($wiki.token)) {
-                Warn "[$wikiKey] Private wiki but no auth configured"
-                $valErr++
-            } else {
-                Pass "[$wikiKey] Auth configured for private wiki"
-            }
-        }
-    }
+# Test connectivity
+try {
+    $siteInfo = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=siteinfo&format=json" -TimeoutSec 5 -UseBasicParsing
+    Pass "Wiki API reachable"
+} catch {
+    Warn "Wiki API not reachable (check your internet)"
 }
 
-if ($valErr -eq 0) {
-    Pass "All validations passed"
-} else {
-    $plural = if ($valErr -eq 1) { "" } else { "s" }
-    Warn "$valErr validation warning$plural — config may need manual review"
+# Test MCP server (with 60s timeout — first download can be slow)
+Info "Checking MCP server (this may take a moment)..."
+try {
+    $mcpVer = & npx.cmd --yes @professional-wiki/mediawiki-mcp-server@latest --version 2>&1
+    if ($LASTEXITCODE -eq 0 -and $mcpVer) {
+        $mcpVer = ($mcpVer | Select-Object -First 1).Trim()
+        Pass "MCP server ready (v$mcpVer)"
+    } else {
+        throw "npx exit code: $LASTEXITCODE"
+    }
+} catch {
+    Warn "MCP server check failed — it'll download on first run."
+    Info "This is normal — it'll work when you run 'wiki-mcp'."
 }
 
 # ── Done ─────────────────────────────────────────────────────────────────
+$repoPath = (Get-Location).Path
 Pop-Location
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
-Write-Host "  Setup complete!" -ForegroundColor Green
+Write-Host "  wiki-mcp setup complete!" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Next steps:"
-Write-Host "    cd $RepoDir"
-Write-Host "    opencode ."
-if ($aliasExists -or (Get-Content $ProfilePath -ErrorAction SilentlyContinue) -match "wiki-mcp") {
-    Write-Host "    wiki-mcp  (alias)"
-}
+
 if ($shortcutsCreated -gt 0) {
+    Write-Host "  Double-click the desktop icon or find"
+    Write-Host "  'NITC Wiki MCP' in your Start Menu."
     Write-Host ""
-    Write-Host "  Shortcuts created:"
-    if (Test-Path "$desktop\NITC Wiki MCP.lnk") {
-        Write-Host "    Desktop: NITC Wiki MCP"
-    }
-    if (Test-Path "$startMenu\NITC Wiki MCP.lnk") {
-        Write-Host "    Start Menu: NITC Wiki MCP"
-    }
 }
+
+if ($aliasExists -or (Test-Path $ProfilePath -and (Get-Content $ProfilePath -Raw -ErrorAction SilentlyContinue) -match "wiki-mcp")) {
+    Write-Host "  Or run:  wiki-mcp"
+    Write-Host "  (Restart PowerShell or '. `$PROFILE' first if using the same session)"
+    Write-Host ""
+}
+
+Write-Host "  Config files:"
+Write-Host "    $repoPath\opencode.json"
+Write-Host "    $repoPath\config.json"
 Write-Host ""
-Write-Host "  To edit the wiki later, add a bot password to config.json:"
-Write-Host "    https://wiki.fosscell.org/Special:BotPasswords"
+
+$cfgCheck = Get-Content (Resolve-RelativePath "$repoPath\config.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $cfgCheck.wikis."wiki.fosscell.org".username) {
+    Write-Host "  Credentials not configured. Edit config.json to add them:" -ForegroundColor Yellow
+    Write-Host "    notepad $repoPath\config.json" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+Write-Host "  First run? opencode will download the model (~2GB)."
+Write-Host "  This happens once."
+Write-Host ""
+Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
 
 if ($IsInteractive) {
-    Read-Host "Press Enter to exit"
+    Read-Host "Press Enter to close this window..."
 }
