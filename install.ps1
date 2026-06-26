@@ -621,15 +621,14 @@ try {
     Warn "Wiki API not reachable (check your internet)"
 }
 
-# Test MCP server (with 60s timeout — first download can be slow)
-Info "Checking MCP server (this may take a moment)..."
+# Check MCP package availability (npm view — no server start, no block)
+Info "Checking MCP server package..."
 try {
-    $mcpVer = & npx.cmd --yes @professional-wiki/mediawiki-mcp-server@latest --version 2>&1
-    if ($LASTEXITCODE -eq 0 -and $mcpVer) {
-        $mcpVer = ($mcpVer | Select-Object -First 1).Trim()
-        Pass "MCP server ready (v$mcpVer)"
+    $mcpVer = & npm.cmd view @professional-wiki/mediawiki-mcp-server version 2>&1 | Select-Object -Last 1
+    if ($mcpVer -and $mcpVer -match '^\d') {
+        Pass "MCP server package available (v$($mcpVer.Trim()))"
     } else {
-        throw "npx exit code: $LASTEXITCODE"
+        throw "no version returned"
     }
 } catch {
     Warn "MCP server check failed — it'll download on first run."
