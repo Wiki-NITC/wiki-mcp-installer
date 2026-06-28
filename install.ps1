@@ -21,12 +21,16 @@
 
     # Remote one-liner:
     powershell -c "iwr -useb https://raw.githubusercontent.com/Wiki-NITC/wiki-mcp/main/scripts/install.ps1 | iex"
+
+    # Skip bot password (configure manually later):
+    .\install.ps1 -SkipBotPassword
 #>
 
 #Requires -Version 5.1
 
 param(
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [switch]$SkipBotPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -442,76 +446,108 @@ Pass "Wiki account check done"
 # ── 7. Bot password setup ────────────────────────────────────────────────
 Step "Step 7: Bot password"
 
-$config = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-$wiki = $config.wikis."wiki.fosscell.org"
-
-if ($wiki.username -and $wiki.password) {
-    Pass "Credentials already configured for user '$($wiki.username)'"
+if ($SkipBotPassword) {
+    Warn "Skipping bot password setup (-SkipBotPassword flag set)."
+    Warn "Configure credentials manually later: notepad config.json"
 } else {
-    Write-Host "  Now create a bot password so the AI can log in." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  A browser window will open to:" -ForegroundColor Yellow
-    Write-Host "     https://wiki.fosscell.org/Special:BotPasswords" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Steps in the browser:" -ForegroundColor Yellow
-    Write-Host "    1. Log in (if not already)" -ForegroundColor Yellow
-    Write-Host "    2. Name it:  wiki-mcp" -ForegroundColor Yellow
-    Write-Host "    3. Tick: Basic rights + Edit existing pages + Create, edit, and move pages + High-volume editing" -ForegroundColor Yellow
-    Write-Host "    4. Click 'Create'" -ForegroundColor Yellow
-    Write-Host "    5. Copy the generated password" -ForegroundColor Yellow
-    Write-Host ""
+    $config = Get-Content "config.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+    $wiki = $config.wikis."wiki.fosscell.org"
 
-    if ($IsInteractive) {
-        Read-Host "  Press Enter to open the browser and continue..."
+    if ($wiki.username -and $wiki.password) {
+        Pass "Credentials already configured for user '$($wiki.username)'"
     } else {
-        Write-Host "  [SKIP] Opening browser (non-interactive mode)" -ForegroundColor Yellow
-    }
-    try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
-    catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
+        Write-Host "  Now create a bot password so the AI can log in." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  A browser window will open to:" -ForegroundColor Yellow
+        Write-Host "     https://wiki.fosscell.org/Special:BotPasswords" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Steps in the browser:" -ForegroundColor Yellow
+        Write-Host "    1. Log in (if not already)" -ForegroundColor Yellow
+        Write-Host "    2. Name it:  wiki-mcp" -ForegroundColor Yellow
+        Write-Host "    3. Tick: Basic rights + Edit existing pages + Create, edit, and move pages + High-volume editing" -ForegroundColor Yellow
+        Write-Host "    4. Click 'Create'" -ForegroundColor Yellow
+        Write-Host "    5. Copy the generated password" -ForegroundColor Yellow
+        Write-Host ""
 
-    $botUser = Read-HostSafe "  Bot username (e.g. MyName@wiki-mcp)" ""
-    if ($IsInteractive) {
-        $botPass = Read-Host "  Bot password" -AsSecureString
-    } else {
-        Write-Host "  [SKIP] Bot password entry (non-interactive mode)" -ForegroundColor Yellow
-        $botPass = $null
-    }
-
-    if ($botUser -and $botPass) {
-        $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
-
-        Info "Verifying credentials..."
-        $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
-        $token = $loginToken.query.tokens.logintoken
-
-        $loginBody = @{
-            action    = "login"
-            lgname    = $botUser
-            lgpassword = $botPassPlain
-            lgtoken   = $token
-            format    = "json"
+        if ($IsInteractive) {
+            Read-Host "  Press Enter to open the browser and continue..."
+        } else {
+            Write-Host "  [SKIP] Opening browser (non-interactive mode)" -ForegroundColor Yellow
         }
-        try {
-            $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
-            if ($loginResult.login.result -eq "Success") {
-                Pass "Wiki credentials verified"
+        try { Start-Process "https://wiki.fosscell.org/Special:BotPasswords" }
+        catch { [System.Diagnostics.Process]::Start("https://wiki.fosscell.org/Special:BotPasswords") | Out-Null }
 
-                $config.wikis."wiki.fosscell.org".username = $botUser
-                $config.wikis."wiki.fosscell.org".password = $botPassPlain
-                $json = $config | ConvertTo-Json -Depth 5
-                [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
-                Pass "Credentials saved to config.json"
-            } else {
-                Warn "Login failed: $($loginResult.login.result). Credentials not saved."
-                Warn "You can manually add them to config.json later."
+        $verified = $false
+        $attempts = 0
+
+        while (-not $verified -and $attempts -lt 3) {
+            $attempts++
+            $botUser = Read-HostSafe "  Bot username (e.g. MyName@wiki-mcp, or type 'skip' to bypass)" ""
+
+            if ($botUser -match '^(?i)skip$') {
+                Warn "Skipping bot password setup. Configure credentials manually later:"
+                Warn "  notepad config.json"
+                break
             }
-        } catch {
-            Warn "Could not reach the wiki API. Credentials not saved."
-            Warn "You can manually add them to config.json later."
+
+            if (-not $IsInteractive) {
+                Write-Host "  [SKIP] Bot password entry (non-interactive mode)" -ForegroundColor Yellow
+                break
+            }
+
+            $botPass = Read-Host "  Bot password" -AsSecureString
+            $botPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($botPass))
+            $botPassPlain = $botPassPlain.Trim()
+
+            if (-not $botUser -or -not $botPassPlain) {
+                Warn "Username or password was empty. Try again."
+                continue
+            }
+
+            if ($botPassPlain.Length -ne 32) {
+                Warn "Bot password is $($botPassPlain.Length) characters — expected 32. This usually means a paste error."
+                Warn "Try typing the password manually instead of pasting it."
+            }
+
+            Info "Verifying credentials..."
+            try {
+                $loginToken = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php?action=query&meta=tokens&type=login&format=json" -SessionVariable ws -UseBasicParsing
+                $token = $loginToken.query.tokens.logintoken
+
+                $loginBody = @{
+                    action     = "login"
+                    lgname     = $botUser
+                    lgpassword = $botPassPlain
+                    lgtoken    = $token
+                    format     = "json"
+                }
+
+                $loginResult = Invoke-RestMethod -Uri "https://wiki.fosscell.org/api.php" -Method Post -Body $loginBody -WebSession $ws -UseBasicParsing
+
+                if ($loginResult.login.result -eq "Success") {
+                    Pass "Wiki credentials verified"
+                    $config.wikis."wiki.fosscell.org".username = $botUser
+                    $config.wikis."wiki.fosscell.org".password = $botPassPlain
+                    $json = $config | ConvertTo-Json -Depth 5
+                    [System.IO.File]::WriteAllText((Resolve-RelativePath "config.json"), $json, [System.Text.UTF8Encoding]::new($false))
+                    Pass "Credentials saved to config.json"
+                    $verified = $true
+                } else {
+                    Warn "Login failed: $($loginResult.login.result)"
+                    if ($loginResult.login.reason) { Warn "Reason: $($loginResult.login.reason)" }
+                    Warn "Try typing the password manually instead of pasting, then try again."
+                    if ($attempts -ge 3) {
+                        Warn "3 attempts failed. Type 'skip' as the username to bypass, or run: .\install.ps1 -SkipBotPassword"
+                    }
+                }
+            } catch {
+                Warn "Could not reach the wiki API: $($_.Exception.Message)"
+                if ($attempts -ge 3) {
+                    Warn "3 attempts failed. Type 'skip' as the username to bypass, or run: .\install.ps1 -SkipBotPassword"
+                }
+            }
         }
-    } else {
-        Warn "Skipping credential verification (no bot user/password provided)"
     }
 }
 
