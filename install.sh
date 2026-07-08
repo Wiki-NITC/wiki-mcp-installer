@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# install.sh — One-command setup for wiki-mcp (Ubuntu)
+# install.sh — One-command setup for wiki-mcp (Ubuntu / Arch Linux)
 #
-# Usage: bash testinstaller.sh
+# Usage: bash install.sh
 #
 # What it does:
 #   1. Installs prerequisites (curl, jq, Node.js 22+)
@@ -33,14 +33,20 @@ _detect_gui
 # ── Header ───────────────────────────────────────────────────────────────
 clear
 echo "=============================================="
-echo "  wiki-mcp Installer for Ubuntu"
+echo "  wiki-mcp Installer for Linux"
+echo "  (Ubuntu / Arch Linux)"
 echo "=============================================="
 echo ""
 
 # ── Step 1: OS check ────────────────────────────────────────────────────
 echo "--- Step 1: OS check ---"
-if [ "$(uname -s)" != "Linux" ] || [ ! -f /etc/os-release ] || ! grep -qi ubuntu /etc/os-release 2>/dev/null; then
-  fail "This script is designed for Ubuntu."
+DISTRO=""
+if [ "$(uname -s)" = "Linux" ] && [ -f /etc/os-release ]; then
+  grep -qi ubuntu /etc/os-release 2>/dev/null && DISTRO="ubuntu"
+  grep -qi arch /etc/os-release 2>/dev/null && DISTRO="arch"
+fi
+if [ -z "$DISTRO" ]; then
+  fail "This script supports Ubuntu and Arch Linux."
   info "Detected: $(uname -s) $(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"')"
   exit 1
 fi
@@ -50,19 +56,33 @@ echo ""
 
 # ── Step 2: Install system packages ─────────────────────────────────────
 echo "--- Step 2: Installing system packages ---"
-sudo apt update -qq || true
-APT_OK=true
-sudo apt install -y -qq curl jq git zenity || APT_OK=false
-if ! $APT_OK; then
-  warn "zenity install failed. Retrying without zenity..."
-  sudo apt install -y -qq curl jq git || {
-    fail "Could not install required packages. Check your internet and sudo access."
-    exit 1
+if [ "$DISTRO" = "arch" ]; then
+  sudo pacman -Sy --noconfirm curl jq git zenity 2>/dev/null && {
+    pass "curl, jq, git, zenity installed"
+    _detect_gui
+  } || {
+    warn "zenity install failed. Retrying without zenity..."
+    sudo pacman -S --noconfirm curl jq git || {
+      fail "Could not install required packages. Check your internet and sudo access."
+      exit 1
+    }
+    pass "curl, jq, git installed"
   }
-  pass "curl, jq, git installed"
 else
-  pass "curl, jq, git, zenity installed"
-  _detect_gui
+  sudo apt update -qq || true
+  APT_OK=true
+  sudo apt install -y -qq curl jq git zenity || APT_OK=false
+  if ! $APT_OK; then
+    warn "zenity install failed. Retrying without zenity..."
+    sudo apt install -y -qq curl jq git || {
+      fail "Could not install required packages. Check your internet and sudo access."
+      exit 1
+    }
+    pass "curl, jq, git installed"
+  else
+    pass "curl, jq, git, zenity installed"
+    _detect_gui
+  fi
 fi
 echo ""
 
@@ -89,10 +109,15 @@ if [ -n "$NODE_CMD" ]; then
 fi
 
 if [ "$HAS_NODE" != true ]; then
-  info "Installing Node.js 22.x from NodeSource..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - || \
-    warn "NodeSource script failed — may fall back to distro package"
-  sudo apt install -y -qq nodejs
+  if [ "$DISTRO" = "arch" ]; then
+    info "Installing Node.js 22.x from Arch repos..."
+    sudo pacman -S --noconfirm nodejs npm
+  else
+    info "Installing Node.js 22.x from NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - || \
+      warn "NodeSource script failed — may fall back to distro package"
+    sudo apt install -y -qq nodejs
+  fi
   NODE_CMD="$(command -v node || command -v nodejs || true)"
   if [ -z "$NODE_CMD" ]; then
     fail "Node.js installation failed — binary not found"
@@ -101,7 +126,7 @@ if [ "$HAS_NODE" != true ]; then
   NODE_VER="$($NODE_CMD -v)"
   NODE_MAJOR="$(echo "$NODE_VER" | sed 's/v//' | cut -d. -f1)"
   if [ "$NODE_MAJOR" -lt 22 ]; then
-    fail "Node $NODE_VER is too old (need 22+). Try adding NodeSource manually: https://deb.nodesource.com/"
+    fail "Node $NODE_VER is too old (need 22+). Try installing Node.js 22+ manually."
     exit 1
   fi
   pass "Node $NODE_VER installed"
@@ -387,12 +412,14 @@ mkdir -p "$ICON_DIR"
 cat > "$ICON_DIR/wiki-mcp.svg" << 'EOF'
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
   <circle cx="64" cy="64" r="60" fill="#2E86C1"/>
-  <text x="64" y="80" text-anchor="middle" font-size="64" font-family="Ubuntu, sans-serif" fill="white" font-weight="bold">W</text>
+  <text x="64" y="80" text-anchor="middle" font-size="64" font-family="sans-serif" fill="white" font-weight="bold">W</text>
 </svg>
 EOF
 
 # Create .desktop file
-DESKTOP_FILE="$HOME/.local/share/applications/wiki-mcp.desktop"
+APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$APPS_DIR"
+DESKTOP_FILE="$APPS_DIR/wiki-mcp.desktop"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Version=1.0
@@ -414,7 +441,7 @@ DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 if [ -d "$DESKTOP_DIR" ]; then
   cp "$DESKTOP_FILE" "$DESKTOP_DIR/wiki-mcp.desktop"
   chmod +x "$DESKTOP_DIR/wiki-mcp.desktop"
-  # Mark launcher as trusted in GNOME (if gio is available)
+  # Mark launcher as trusted (GNOME) — KDE/Qt desktops trust by executable bit
   if command -v gio &>/dev/null; then
     gio set "$DESKTOP_DIR/wiki-mcp.desktop" metadata::trusted true 2>/dev/null || true
   fi
@@ -423,8 +450,13 @@ else
   pass "App launcher created (no Desktop folder found)"
 fi
 
-# Update icon cache so the icon shows up
+# Update icon/desktop-file caches so the launcher shows up in the app menu
+# GNOME / XFCE / Cinnamon (GTK-based)
 gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+# KDE Plasma 6
+command -v kbuildsycoca6 &>/dev/null && kbuildsycoca6 --noincremental 2>/dev/null || true
+# KDE Plasma 5
+command -v kbuildsycoca5 &>/dev/null && kbuildsycoca5 --noincremental 2>/dev/null || true
 
 echo ""
 
